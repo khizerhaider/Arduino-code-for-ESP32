@@ -1,0 +1,126 @@
+#include <SoftwareSerial.h>
+
+//******************* Necessary Variables *******************//
+boolean stringComplete = false;
+String inputString = "";
+String fromGSM = "";
+bool CALL_END = true;
+char* response = " ";
+String res = "";
+String msg;
+String custom_message;
+
+//******************* SIM Parameters *******************//
+String SOS_NUM = "+923333075748";
+
+//******************* SOS Button Press  *******************//
+int SOS_Time = 5; // Press the button 5 sec
+
+SoftwareSerial sim900D(3, 1); // RX, TX
+
+void setup() {
+  Serial.begin(115200);
+  sim900D.begin(9600); // SIM900D baud rate
+
+  // Configuring SIM900D for SMS
+  sim900D.println("AT+CMGF=1");
+  delay(1000);
+  sim900D.println("AT+CSMP=17,167,0,0");
+  delay(1000);
+  sim900D.println("AT+CPMS=\"SM\",\"ME\",\"SM\"");
+  delay(1000);
+
+  // Turning on GPS
+  sim900D.println("AT+CGPSPWR=1");
+  delay(1000);
+
+  // Call the function to retrieve location and send SMS directly
+  Get_gmap_link(true); // true to make a call
+}
+
+void loop() {
+  // Listen from SIM900D
+  if (sim900D.available()) {
+    char inChar = sim900D.read();
+
+    if (inChar == '\n') {
+      // Check the state
+      if (fromGSM == "RING\r") {
+        sim900D.println("ATA");
+      } else if (fromGSM == "NO CARRIER\r") {
+        Serial.println("---------CALL ENDS-------");
+        CALL_END = true;
+      }
+
+      // Write the actual response
+      Serial.println(fromGSM);
+      // Clear the buffer
+      fromGSM = "";
+    } else {
+      fromGSM += inChar;
+    }
+    delay(20);
+  }
+}
+
+//---------------------------------------------  Getting Location and making Google Maps link of it. Also making call if needed
+void Get_gmap_link(bool makeCall) {
+  sim900D.println("AT+CGPSINF=0");
+  delay(1000);
+
+  while (!sim900D.available());
+  while (sim900D.available()) {
+    char add = sim900D.read();
+    res = res + add;
+    delay(1);
+  }
+
+  res = res.substring(res.indexOf(":") + 2);
+  response = &res[0];
+
+  Serial.print("Received Data - "); Serial.println(response); // Printing the String
+  Serial.println("\n");
+
+  if (strstr(response, "GPS NOT")) {
+    Serial.println("No Location data");
+    custom_message = "Unable to fetch location. Please try again";
+    Send_SMS(custom_message);
+  } else {
+    int i = 0;
+    while (response[i] != ',')
+      i++;
+
+    String location = (String)response;
+    String lat = location.substring(0, i);
+    String longi = location.substring(i + 1);
+    Serial.println(lat);
+    Serial.println(longi);
+
+    String Gmaps_link = "I'm Here " + ("http://maps.google.com/maps?q=" + lat + "+" + longi);
+    custom_message = Gmaps_link;
+    Send_SMS(custom_message);
+  }
+
+  response = "";
+  res = "";
+  if (makeCall) {
+    Serial.println("Calling Now");
+    sim900D.println("ATD" + SOS_NUM + ";");
+    CALL_END = false;
+  }
+}
+
+void Send_SMS(String message) {
+  sim900D.println("AT+CMGF=1");
+  delay(1000);
+  sim900D.println("AT+CMGS=\"" + SOS_NUM + "\"");
+  delay(1000);
+
+  sim900D.println(message);
+  delay(1000);
+  sim900D.println((char)26);
+  delay(1000);
+
+  sim900D.println("AT+CMGD=1,4"); // Delete stored SMS to save memory
+  delay(3000);
+}
